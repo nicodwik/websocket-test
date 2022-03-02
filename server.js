@@ -27,6 +27,7 @@ io.on("connection", function (socket) {
 
   socket.on("createUser", function (user) {
     user = JSON.parse(user);
+    user['socketId'] = socket.id;
     socket.currentUser = user;
     users[user.id] = user;
     socket.currentRoom = "global";
@@ -43,17 +44,34 @@ io.on("connection", function (socket) {
   });
 
   socket.on("sendMessage", function (data) {
-    io.sockets.to(socket.currentRoom).emit("updateChat", socket.currentUser, data);
+    if (!socket.currentUser) {
+      console.log(`User not detected disconnected from server.`);
+      return false;
+    };
+
+    dataDecode = JSON.parse(data);
+    io.sockets.to(socket.currentRoom).emit("updateChat", socket.currentUser, dataDecode.message);
+    targets = dataDecode.opposites;
+    try {
+        targets.forEach(element => {
+            target = users[element];
+            if (target != undefined) {
+                if (target.socketId != socket.id ){
+                    console.log(target.socketId + " target notif");
+                    io.to(target.socketId).emit("getNotif", "INFO", data);
+                }
+            }
+        });
+    } catch (error) {
+        console.log(error);
+    }
   });
 
-  // socket.on("createRoom", function (room) {
-  //   if (room != null) {
-  //     rooms.push({ name: room, creator: socket.currentUser.name });
-  //     io.sockets.emit("updateRooms", rooms, null);
-  //   }
-  // });
-
   socket.on("updateRooms", function (room) {
+    if (!socket.currentUser) {
+      console.log(`User not detected disconnected from server.`);
+      return false;
+    };
     socket.broadcast
       .to(socket.currentRoom)
       .emit("updateChat", "INFO", socket.currentUser.name + " left room");
@@ -71,20 +89,23 @@ io.on("connection", function (socket) {
   });
 
   socket.on("disconnect", function () {
-    if (!socket.currentRoom) {
+    if (!socket.currentUser) {
       console.log(`User not detected disconnected from server.`);
-      return false
+      return false;
     };
+
     console.log(`User ${socket.currentUser.name} disconnected from server.`);
-    delete users[socket.currentUser.id]
     io.sockets.emit("updateUsers", users);
     socket.broadcast.emit(
       "updateChat",
       "INFO",
       socket.currentUser.name + " has disconnected"
     );
+
+    delete users[socket.currentUser.id];
   });
 });
+
 server.listen(port, function () {
   console.log("Listening to port " + port);
 });

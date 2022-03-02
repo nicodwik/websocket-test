@@ -1,4 +1,5 @@
-var socket = io();
+// var socket = io("wss://boiling-citadel-46181.herokuapp.com");
+var socket = io("");
 
 var userlist = document.getElementById("active_users_list");
 var roomlist = document.getElementById("active_rooms_list");
@@ -8,7 +9,14 @@ var roomInput = document.getElementById("roomInput");
 var createRoomBtn = document.getElementById("room_add_icon_holder");
 var chatDisplay = document.getElementById("chat");
 
-var currentRoom = "global";
+var currentRoom = {
+    id : 'global',
+    name : 'Global',
+    avatar : '',
+    type : '',
+    isGroup : false ,
+};
+
 var user = {
   token : "",
   name : "",
@@ -16,7 +24,9 @@ var user = {
   avatar : "",
 };
 let rooms = [];
-let api = 'https://dev-api.ggl.life';
+let targets = [];
+// let api = 'https://dev-api.ggl.life';
+let api = 'http://api.ggl';
 
 email = prompt("Email");
 password = prompt("password");
@@ -28,7 +38,18 @@ socket.on("connect", function () {
 
 // Send message on button click
 sendMessageBtn.addEventListener("click", function () {
-  socket.emit("sendMessage", message.value); // socket
+  data = {
+      from : {
+          id : user.id,
+          name : user.name,
+          avatar : user.avatar,
+      },
+      room : currentRoom,
+      message : message.value,
+      type : 'string',
+      opposites : targets
+  }
+  socket.emit("sendMessage", JSON.stringify(data)); // socket
   createMessage(message.value); // lumen
   message.value = "";
 });
@@ -72,6 +93,18 @@ socket.on("updateChat", function (userevent, data) {
   chatDisplay.scrollTop = chatDisplay.scrollHeight;
 });
 
+socket.on(`getNotif`, function (userevent, data) {
+    data = JSON.parse(data);
+    if (data.room.isGroup) {
+        $('.toast strong').html(`Pesan baru dari ${data.room.name}`);
+        $('.toast .toast-body').html(`${data.from.name} : ${data.message}`);
+    }else{
+        $('.toast strong').html(`Pesan baru dari ${data.from.name}`);
+        $('.toast .toast-body').html(data.message);
+    }
+    $('.toast').toast('show');
+});
+
 socket.on("updateUsers", function (users) {
   userlist.innerHTML = "";
   console.log("user returned from server", users);
@@ -83,24 +116,16 @@ socket.on("updateUsers", function (users) {
   }
 });
 
-// socket.on("updateRooms", function (rooms, newRoom) {
-//   roomlist.innerHTML = "";
 
-//   for (var index in rooms) {
-//     roomlist.innerHTML += `<div class="room_card" id="${rooms[index].name}"
-//                                 onclick="changeRoom('${rooms[index].name}')">
-//                                 <div class="room_item_content">
-//                                     <div class="pic"></div>
-//                                     <div class="roomInfo">
-//                                     <span class="room_name">#${rooms[index].name}</span>
-//                                     <span class="room_author">${rooms[index].creator}</span>
-//                                     </div>
-//                                 </div>
-//                             </div>`;
-//   }
+socket.on("connect_error", () => {
+  setTimeout(() => {
+    socket.connect();
+  }, 1000);
+});
 
-//   document.getElementById(currentRoom).classList.add("active_item");
-// });
+socket.on("disconnect", (reason) => {
+  console.log(reason);
+});
 
 function changeRoom(element) {
   data = {
@@ -108,14 +133,19 @@ function changeRoom(element) {
     name : $(element).data('name'),
     avatar : $(element).data('avatar'),
     type : $(element).data('type'),
+    isGroup : $(element).data('isgroup'),
   }
-  if (data.id != currentRoom) {
+  if (data.id != currentRoom.id) {
     socket.emit("updateRooms", data);
-    // document.getElementById(currentRoom).classList.remove("active_item");
-    currentRoom = data.id;
-    // document.getElementById(currentRoom).classList.add("active_item");
+    currentRoom = data;
     chatDisplay.innerHTML = "";
     listMessage();
+    rooms.forEach( element => {
+        if (element.id == data.id) {
+            console.log(element);
+            targets = element.members.map( e => e.id);
+        }
+    });
   }
 }
 
@@ -142,12 +172,13 @@ function listRoom(){
                                     data-name="${element.name}"
                                     data-avatar="${element.avatar}"
                                     data-type="${element.type}"
+                                    data-isGroup="${element.is_group}"
                                     >
                                     <div class="room_item_content">
                                         <div class="pic"></div>
                                         <div class="roomInfo">
                                         <span class="room_name">#${element.name}</span>
-                                        <span class="room_author">${element.is_group ? 'group' : 'chat'} - ${element.type}</span>
+                                        <span class="room_author">${element.last_message.person.name} : ${element.last_message.message}</span>
                                         </div>
                                     </div>
                                 </div>`;
@@ -156,7 +187,6 @@ function listRoom(){
     })
     .catch(error => console.log('error', error));
 
-  // document.getElementById(currentRoom).classList.add("active_item");
 }
 
 function createMessage(message){
@@ -166,7 +196,7 @@ function createMessage(message){
 
   var urlencoded = new URLSearchParams();
   urlencoded.append("status", "created");
-  urlencoded.append("room", currentRoom);
+  urlencoded.append("room", currentRoom.id);
   urlencoded.append("message", message);
 
   var requestOptions = {
@@ -191,19 +221,17 @@ function listMessage(){
         redirect: 'follow'
     };
 
-    fetch(`${api}/v1/chatting/list-message?room=`+ currentRoom, requestOptions)
+    fetch(`${api}/v1/chatting/list-message?room=`+ currentRoom.id, requestOptions)
     .then(response => response.json())
     .then(result => {
         result = result.msgServer.data;
         for (var r in result) {
           element = result[r];
-          console.log(element);
-          console.log(user.id);
-          chatDisplay.innerHTML += `<div class="message_holder ${element.member === user.id ? "me" : ""}">
+          chatDisplay.innerHTML += `<div class="message_holder ${element.person.id === user.id ? "me" : ""}">
                                     <div class="pic"></div>
                                     <div class="message_box">
                                       <div id="message" class="message">
-                                        <span class="message_name">${element.name}</span>
+                                        <span class="message_name">${element.person.name}</span>
                                         <span class="message_text">${element.message}</span>
                                       </div>
                                     </div>
@@ -222,6 +250,7 @@ function login(email, password){
   var requestOptions = {
     method: 'POST',
     body: formdata,
+    redirect: 'follow'
   };
 
   fetch(`${api}/v1/auth/login`, requestOptions)
